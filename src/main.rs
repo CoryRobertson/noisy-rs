@@ -116,6 +116,10 @@ async fn send_user_message(ctx: &Context, name: WebEvent, message_id: Arc<Mutex<
             match message.reaction_users(&ctx.http,'😀',None,None,).await {
                 Ok(reaction_users) => {
 
+                    // TODO: something we can also do is get the channel that the message is in (or just store a channel and not have a reaction message at all), then iterate through the users
+                    //  and compare each of their usernames with usernames sent through the WebEvent that gets received
+                    //  -> https://docs.rs/serenity/latest/serenity/model/channel/struct.Message.html#method.channel
+                    //  -> https://docs.rs/serenity/latest/serenity/model/channel/struct.GuildChannel.html#method.members
 
                     for user in reaction_users.iter().filter(|user| !user.bot) {
                         match user.direct_message(&ctx.http,CreateMessage::new().content("test")).await {

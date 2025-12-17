@@ -1,8 +1,8 @@
 use axum::extract::State;
-use axum::routing::get;
-use axum::Router;
-use chrono::Utc;
-use serenity::all::{GatewayIntents, GuildId, Message, MessageBuilder, Ready};
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use chrono::{DateTime, NaiveDateTime, Utc};
+use serenity::all::{GatewayIntents, GuildId, Message, MessageBuilder, Ready, UserId};
 use serenity::builder::CreateMessage;
 use serenity::gateway::ActivityData;
 use serenity::prelude::{Context, EventHandler};
@@ -11,15 +11,35 @@ use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use axum::body::Body;
+use axum::http::Response;
+use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{Receiver, Sender};
 use tokio::sync::Mutex;
+
+#[derive(Clone, Deserialize, Serialize)]
+struct Guest {
+    user_id: String,
+    notify_amount: u32
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct NewEvent {
+    event_id: String,
+    start_time: NaiveDateTime,
+    end_time: NaiveDateTime,
+    event_type: String,
+    event_title: String,
+    guest_list: Vec<Guest>
+}
+
 
 /// this is the bot handler
 struct Handler {
     /// this is a boolean that checks if we have already spawned the threads that the bot use
     thread_running: AtomicBool,
     /// this is a web event receiver that will prompt the bot to message all users
-    receiver: Receiver<WebEvent>,
+    receiver: Receiver<Procedure>,
     /// this is the message that the bot will keep track of reactions from
     /// eventually we probably want to persist this message field so we don't have to run the setup command every time the bot starts
     /// we could also probably store a list of them, or a map of them that has different categories so we can have messages sent out to multiple different lists of people
@@ -91,11 +111,8 @@ impl EventHandler for Handler {
                     set_activity_to_current_time(&ctx1);
 
                     if let Ok(event) = recv1.try_recv() {
-                        if event.do_thing {
-
-                            send_user_message(&ctx1, event, react_message.clone()).await;
-
-                        }
+                        // send_user_message(&ctx1, event, react_message.clone()).await;
+                        //todo: work from here
                     }
 
                     tokio::time::sleep(Duration::from_secs(5)).await;
@@ -184,8 +201,9 @@ async fn main() {
 
 
 /// handles the webserver creation, basically just an input to the bot
-async fn start_webserver(sender: Sender<WebEvent>) {
-    let app = Router::new().route("/", get(handle_web_event))
+async fn start_webserver(sender: Sender<Procedure>) {
+    let app = Router::new()
+        .route("/new_event", post(handle_new_event))
         .with_state(Arc::new(WebserverState {
             sender: sender.clone(),
         }));
@@ -194,17 +212,21 @@ async fn start_webserver(sender: Sender<WebEvent>) {
     axum::serve(listener,app).await.unwrap();
 }
 
-/// shared state for the webserver, this is the event sender that the bot will listen to
-struct WebserverState {
-    sender: Sender<WebEvent>,
+async fn handle_new_event(
+    State(state): State<Arc<WebserverState>>,
+    Json(event): Json<NewEvent>,
+) -> Response<Body> {
+    let _ = state.sender.send(Procedure::NEW_EVENT(event));
+
+    Response::builder().status(200).body(Body::empty()).unwrap()
 }
 
-/// this is the input that triggers the bot to do something like direct message users or something
-async fn handle_web_event(
-    State(state): State<Arc<WebserverState>>,
-) -> String {
+/// shared state for the webserver, this is the event sender that the bot will listen to
+struct WebserverState {
+    sender: Sender<Procedure>,
+}
 
-    let _ = state.sender.send(WebEvent {do_thing: true, name: "test name".to_string()});
-
-    "Sent".to_string()
+#[derive(Clone)]
+enum Procedure {
+    NEW_EVENT(NewEvent),
 }

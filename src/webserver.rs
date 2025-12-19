@@ -2,11 +2,11 @@ use crate::event::Event;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::Response;
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use axum::response::IntoResponse;
 use tokio::sync::broadcast::Sender;
 
 /// handles the webserver creation, basically just an input to the bot
@@ -23,9 +23,12 @@ pub async fn start_webserver(sender: Sender<Procedure>) {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn test_page(State(state): State<Arc<WebserverState>>,) -> impl IntoResponse {
+async fn test_page(State(state): State<Arc<WebserverState>>) -> impl IntoResponse {
     #[cfg(debug_assertions)]
-    state.sender.send(Procedure::NewEvent(Event::default())).unwrap();
+    state
+        .sender
+        .send(Procedure::NewEvent(Event::default()))
+        .unwrap();
 
     "Yay"
 }
@@ -51,5 +54,4 @@ pub struct WebserverState {
 pub enum Procedure {
     /// Creates a new event that is tracked by the bot
     NewEvent(Event),
-
 }

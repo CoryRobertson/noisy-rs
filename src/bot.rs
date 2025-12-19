@@ -1,7 +1,6 @@
 use crate::event::Event;
 use crate::webserver::Procedure;
 use chrono::Utc;
-use cr_lommy::AllArgsConstructor;
 use serenity::all::{
     ActivityData, Context, CreateMessage, EventHandler, GuildId, Message, MessageBuilder, Ready,
 };
@@ -15,7 +14,7 @@ use tokio::sync::Mutex;
 use tracing::log::{debug, error, info};
 
 /// this is the bot handler
-#[derive(AllArgsConstructor, Debug)]
+#[derive(Debug)]
 pub struct Handler {
     /// this is a boolean that checks if we have already spawned the threads that the bot use
     thread_running: AtomicBool,
@@ -165,8 +164,18 @@ async fn react_to_procedures(mut bot_state: BotState, ctx: Arc<Context>) {
                 match procedure {
                     Procedure::NewEvent(_new_event) => {
                         // example implementation
-                        for member_list_future in ctx.cache.guilds().iter().map(|g| g.members(&ctx.http, None, None)) {
-                            for name in member_list_future.await.iter().flatten().map(|m| m.display_name().clone()) {
+                        for member_list_future in ctx
+                            .cache
+                            .guilds()
+                            .iter()
+                            .map(|g| g.members(&ctx.http, None, None))
+                        {
+                            for name in member_list_future
+                                .await
+                                .iter()
+                                .flatten()
+                                .map(|m| m.display_name().clone())
+                            {
                                 info!("name: {name}");
                             }
                         }

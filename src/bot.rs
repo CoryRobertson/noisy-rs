@@ -30,6 +30,10 @@ impl Handler {
             bot_state: BotState::new(rx),
         }
     }
+    
+    pub fn get_state(&self) -> &BotState {
+        &self.bot_state
+    }
 }
 
 #[async_trait]
@@ -39,6 +43,10 @@ impl EventHandler for Handler {
 
         // Store a copy of all the guilds that the bot is connected to, so we can reference them in the future
         *self.bot_state.guilds.lock().await = guilds;
+        
+        // store a copy of the context as well, this is so external objects can touch the context should the need arise
+        *self.bot_state.context.lock().await = Some(ctx.clone());
+        
 
         // this context clone is so the async threads can have access to their own bot contexts
         let ctx = Arc::new(ctx);
@@ -84,6 +92,7 @@ pub struct BotState {
     /// A vector of all the guilds that the bot is connected to
     guilds: Arc<Mutex<Vec<GuildId>>>,
     events: Arc<Mutex<Vec<Event>>>,
+    context: Arc<Mutex<Option<Context>>>,
 }
 
 impl Clone for BotState {
@@ -92,6 +101,7 @@ impl Clone for BotState {
             receiver: self.receiver.resubscribe(),
             guilds: self.guilds.clone(),
             events: self.events.clone(),
+            context: self.context.clone(),
         }
     }
 }
@@ -102,7 +112,12 @@ impl BotState {
             receiver,
             guilds: Arc::default(),
             events: Arc::default(),
+            context: Arc::default(),
         }
+    }
+    
+    pub fn get_context(&self) -> Arc<Mutex<Option<Context>>> {
+        self.context.clone()
     }
 }
 

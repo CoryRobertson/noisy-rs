@@ -2,12 +2,13 @@ use std::env;
 use std::sync::Arc;
 use eframe::Frame;
 use egui::Context;
-use serenity::all::GatewayIntents;
+use serenity::all::{GatewayIntents, Member, User};
+use serenity::builder::CreateMessage;
 use serenity::Client;
 use tokio::runtime::{EnterGuard, Runtime};
 use tokio::sync::broadcast::Sender;
 use tokio::sync::Mutex;
-use noisy_rs::bot::Handler;
+use noisy_rs::bot::{BotState, Handler};
 use noisy_rs::webserver::{start_webserver, Procedure};
 
 fn main() {
@@ -29,16 +30,71 @@ struct BotApp {
     sender: Sender<Procedure>,
     web_server: tokio::task::JoinHandle<()>,
     client_handle: tokio::task::JoinHandle<()>,
-    ctx: Arc<Mutex<Option<serenity::client::Context>>>,
+    bot_state: BotState,
+    users: Vec<Member>,
+    input_field: String,
+    selected_user: Option<User>,
 }
 
 impl eframe::App for BotApp {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.label("AAA");
+            if ui.button("Refresh users").clicked() {
+                match self.extract_ctx() {
+                    None => {}
+                    Some(ctx) => {
+                        self.users = ctx.cache.guilds().iter().map(|guild| self.runtime.block_on(guild.members(&ctx.http,None,None)))
+                            .flatten()
+                            .flatten()
+                            .collect();
+                    }
+                }
+            }
+
+            ui.label("Input box:");
+            ui.text_edit_singleline(&mut self.input_field);
+
+
+            egui::ScrollArea::vertical()
+                .show(ui,|ui| {
+                for member_chunk in self.users.as_slice().chunks(3) {
+                    ui.horizontal(|ui| {
+                        for m in member_chunk {
+                            let disable_button = self.selected_user.as_ref().is_some_and(|u| u == &m.user);
+
+                            ui.add_enabled_ui(!disable_button, |ui| {
+                                if ui.button(format!("{}", m)).clicked() {
+                                    self.selected_user = Some(m.user.clone());
+                                }
+                            });
+                        }
+                    });
+                }
+            });
+
+            ui.separator();
+
+            if let Some(user) = self.selected_user.as_ref() {
+                if ui.button(format!("Send to {}", user.display_name())).clicked() {
+                    if let Some(ctx) = self.extract_ctx() {
+                        let _ = self.runtime.block_on(user.direct_message(&ctx.http,CreateMessage::new().content(self.input_field.clone())));
+                    }
+                }
+            }
+
+
         });
     }
 }
+
+impl BotApp {
+    fn extract_ctx(&self) -> Option<serenity::client::Context> {
+        let ctx = self.bot_state.get_context().clone();
+        self.runtime.block_on(ctx.lock()).clone()
+    }
+}
+
+
 
 impl Default for BotApp {
     fn default() -> Self {
@@ -59,7 +115,7 @@ impl Default for BotApp {
         let web_server = rt.spawn(start_webserver(procedure_sender.clone()));
 
         let bot_handler = Handler::new(procedure_receiver.resubscribe());
-        let ctx = bot_handler.get_state().get_context().clone();
+        let bot_state = bot_handler.get_state().clone();
 
         let client_handle = rt.spawn(async move {
             let mut client = Client::builder(&token, intents)
@@ -78,7 +134,10 @@ impl Default for BotApp {
             sender: procedure_sender,
             web_server,
             client_handle,
-            ctx,
+            bot_state,
+            users: Vec::new(),
+            input_field: String::new(),
+            selected_user: None,
         }
     }
 }

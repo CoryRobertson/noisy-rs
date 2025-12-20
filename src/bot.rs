@@ -59,6 +59,9 @@ impl EventHandler for Handler {
     }
 
     async fn message(&self, ctx: Context, msg: Message) {
+
+        // TODO: eventually we want to have a sender receiver pair that sends these messages to other portions of the bot, for example to the gui, or to the web server potentially
+
         if msg.content == "!ping" {
             if let Err(why) = msg.channel_id.say(&ctx.http, "Pong!").await {
                 error!("Error sending message: {why:?}");

@@ -1,26 +1,28 @@
 use noisy_rs::bot::Handler;
+use noisy_rs::event::EventResponse;
 use noisy_rs::webserver;
 use serenity::all::GatewayIntents;
 use serenity::Client;
-use std::{env, fs, io};
 use std::thread::sleep;
 use std::time::Duration;
+use std::{env, fs, io};
 use tracing::{error, info, warn, Level};
-use tracing_subscriber::{fmt, Layer, Registry};
 use tracing_subscriber::fmt::SubscriberBuilder;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use noisy_rs::event::EventResponse;
+use tracing_subscriber::{fmt, Layer, Registry};
 
 #[tokio::main]
 #[tracing::instrument]
 async fn main() {
     let file_appender = tracing_appender::rolling::never("./logs", "logs.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    let file = fmt::layer().json().with_writer(non_blocking).with_ansi(false);
+    let file = fmt::layer()
+        .json()
+        .with_writer(non_blocking)
+        .with_ansi(false);
     let subscriber = tracing_subscriber::fmt().finish();
     subscriber.with(file).init();
-
 
     #[cfg(debug_assertions)]
     if option_env!("DEBUG_JSON").is_some() {
@@ -49,7 +51,7 @@ async fn main() {
         .await
         .expect("Err creating client");
 
-    let webserver = tokio::spawn(webserver::start_webserver(procedure_sender,bot_state));
+    let webserver = tokio::spawn(webserver::start_webserver(procedure_sender, bot_state));
 
     if let Err(why) = client.start().await {
         println!("Client error: {:?}", why);
@@ -64,7 +66,11 @@ async fn main() {
 fn output_debug_json() {
     let event = noisy_rs::event::Event::default();
     let guest = noisy_rs::event::Guest::new("cool_test_user", 1);
-    let change_rsvp = noisy_rs::event::ChangeRSVP{responded: EventResponse::Going, event_id: "123".to_string(), user_id: "234".to_string()};
+    let change_rsvp = noisy_rs::event::ChangeRSVP {
+        responded: EventResponse::Going,
+        event_id: "123".to_string(),
+        user_id: "234".to_string(),
+    };
 
     let json_event = serde_json::to_string(&event).unwrap();
     let json_guest = serde_json::to_string(&guest).unwrap();

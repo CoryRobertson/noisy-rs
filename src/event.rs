@@ -1,7 +1,7 @@
 use chrono::{Local, NaiveDateTime, TimeDelta};
 use serde::{Deserialize, Serialize};
-use std::ops::Add;
 use serenity::futures::future::ok;
+use std::ops::Add;
 use tracing::error;
 
 #[derive(Clone, Deserialize, Serialize, Debug)]
@@ -19,7 +19,7 @@ pub struct Guest {
 pub enum EventResponse {
     Going,
     NotGoing,
-    NoResponse
+    NoResponse,
 }
 
 impl Guest {
@@ -37,13 +37,11 @@ impl Guest {
             return None;
         }
 
-        Some(
-            Self {
-                user_id,
-                notify_amount,
-                responded: EventResponse::NoResponse,
-            }
-        )
+        Some(Self {
+            user_id,
+            notify_amount,
+            responded: EventResponse::NoResponse,
+        })
     }
 
     pub fn user_id(&self) -> &str {
@@ -79,6 +77,8 @@ pub struct Event {
     event_type: String,
     event_title: String,
     guest_list: Vec<Guest>,
+    // TODO: at some point, once the program needs to be runtime persistent, this boolean needs to have Arc<AtomicBool> for each type of notification thread that states of the notification went through,
+    //  this is because we want to resend the notification if the program has closed and reopened
     notify_threads_spawned: bool,
 }
 

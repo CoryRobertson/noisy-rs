@@ -1,12 +1,14 @@
-use std::any::Any;
 use crate::event::{Event, EventResponse, Guest};
 use crate::webserver::Procedure;
 use chrono::{DateTime, Local, Utc};
-use serenity::all::{ActivityData, Context, CreateMessage, EventHandler, GuildId, Message, MessageBuilder, Ready, UserId};
+use serenity::all::{ActivityData, Channel, Context, CreateMessage, EventHandler, GuildId, Message, MessageBuilder, Ready, UserId};
 use serenity::{async_trait, FutureExt};
+use std::any::Any;
+use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use serenity::builder::GetMessages;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::Mutex;
@@ -37,7 +39,6 @@ impl Handler {
 
 #[async_trait]
 impl EventHandler for Handler {
-
     #[tracing::instrument(skip(self, ctx, guilds))]
     async fn cache_ready(&self, ctx: Context, guilds: Vec<GuildId>) {
         info!("Cache built successfully!");
@@ -61,6 +62,33 @@ impl EventHandler for Handler {
             if let Err(why) = msg.channel_id.say(&ctx.http, "Pong!").await {
                 error!("Error sending message: {why:?}");
             }
+        }
+
+        match msg.content.as_str() {
+            "!clear" => {
+                if let Ok(channel) = msg.channel(&ctx.http).await {
+                    match channel {
+                        Channel::Guild(_) => {
+                            // TODO: maybe allow the bot to clear messages it puts in text channels too ??
+                        }
+                        Channel::Private(dm_channel) => {
+                            if let Ok(messages) = dm_channel.messages(&ctx.http,GetMessages::new()).await {
+                                info!("Clear command received, clearing messages in direct message list");
+                                for message in messages {
+                                    if message.author.bot {
+                                        // lazy try to delete message, if we fail who cares
+                                        let _ = message.delete(&ctx.http).await;
+                                    }
+                                }
+                            }
+                        }
+                        _ => {
+                            warn!("Channel type unknown for {msg:?}, {channel:?}");
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
 
         if msg.content == "!setup" {
@@ -160,18 +188,17 @@ async fn setup_bot_threads(bot_state: BotState, ctx: Arc<Context>) {
 #[tracing::instrument(skip(ctx, bot_state))]
 async fn send_notifications(bot_state: BotState, ctx: Arc<Context>) {
     loop {
-        // TODO
         {
             let mut lock = bot_state.events.lock().await;
             for event in lock.iter_mut() {
-                if !event.notify_threads_spawned(){
+                if !event.notify_threads_spawned() {
                     event.set_notify_threads_spawned(true);
 
                     tokio::spawn(creation_notification_spawner(event.clone(), ctx.clone()));
                     tokio::spawn(hour_before_notification_spawner(event.clone(), ctx.clone()));
                     tokio::spawn(day_before_notification_spawner(event.clone(), ctx.clone()));
                     tokio::spawn(rsvp_hour_before_notification_spawner(event.clone(), ctx.clone()));
-
+                    // TODO: more notifications ??
                 }
             }
         }
@@ -184,37 +211,65 @@ async fn rate_limit_delay() {
 }
 
 #[tracing::instrument(skip(ctx))]
-async fn creation_notification_spawner(
-    event: Event,
-    ctx: Arc<Context>,
-){
+async fn creation_notification_spawner(event: Event, ctx: Arc<Context>) {
     info!("Sending notification of new event creation");
-    for user in event.guest_list().iter().filter(|s| s.notify_amount() > 0){
-        let user_id = UserId::new(user.user_id().parse().unwrap());
-        let discord_user = user_id.to_user(&ctx).await.unwrap();
-        discord_user.direct_message(&ctx.http, CreateMessage::new().content(format!("Hi, {}! You are invited to {}. You can RSVP here -> https://eventstar.costionline.com/event/{}", discord_user.display_name(), event.event_title(), event.event_id()))).await.unwrap();
-
+    for user in event.guest_list().iter().filter(|s| s.notify_amount() > 0) {
+        match user.user_id().parse().map(|id| { UserId::new(id) }).map(|id| { id.to_user(&ctx) }) {
+            Ok(id_future) => {
+                match id_future.await {
+                    Ok(discord_user) => {
+                        match discord_user.direct_message(&ctx.http, CreateMessage::new().content(format!("Hi, {}! You are invited to {}. You can RSVP here -> https://eventstar.costionline.com/event/{}", discord_user.display_name(), event.event_title(), event.event_id()))).await {
+                            Ok(_) => {}
+                            Err(err) => {
+                                error!("Error sending message: {err:?}");
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        error!("Error converting user id into user: {err:?}");
+                    }
+                }
+            }
+            Err(err) => {
+                error!("Error parsing user ID: {err:?}");
+            }
+        };
         rate_limit_delay().await;
     }
 }
 
 #[tracing::instrument(skip(ctx))]
-async fn day_before_notification_spawner (
-    event: Event,
-    ctx: Arc<Context>,
-){
-
+async fn day_before_notification_spawner(event: Event, ctx: Arc<Context>) {
     info!("Spawned thread for day before notification");
     #[cfg(debug_assertions)]
     tokio::time::sleep(Duration::from_secs(5)).await;
     loop {
-        let time_difference = event.start_time().signed_duration_since(Local::now().naive_local());
+        let time_difference = event
+            .start_time()
+            .signed_duration_since(Local::now().naive_local());
         if time_difference.num_hours() <= 24 {
             info!("{}: Day before notification sending", event.event_title());
-            for user in event.guest_list().iter().filter(|s| s.notify_amount() > 1){
-                let user_id = UserId::new(user.user_id().parse().unwrap());
-                let discord_user = user_id.to_user(&ctx).await.unwrap();
-                discord_user.direct_message(&ctx.http, CreateMessage::new().content(format!("Hi, {}! {} is tomorrow! Check it out here -> https://eventstar.costionline.com/event/{}", discord_user.display_name(), event.event_title(), event.event_id()))).await.unwrap();
+            for user in event.guest_list().iter().filter(|s| s.notify_amount() > 1) {
+                match user.user_id().parse().map(|id| { UserId::new(id) }).map(|id| { id.to_user(&ctx) }) {
+                    Ok(id_future) => {
+                        match id_future.await {
+                            Ok(discord_user) => {
+                                match discord_user.direct_message(&ctx.http, CreateMessage::new().content(format!("Hi, {}! {} is tomorrow! Check it out here -> https://eventstar.costionline.com/event/{}", discord_user.display_name(), event.event_title(), event.event_id()))).await {
+                                    Ok(_) => {}
+                                    Err(err) => {
+                                        error!("Error sending message: {err:?}");
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                error!("Error converting user id into user: {err:?}");
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        error!("Error parsing user ID: {err:?}");
+                    }
+                };
                 rate_limit_delay().await;
             }
             info!("{}: Day before notification finished", event.event_title());
@@ -225,21 +280,37 @@ async fn day_before_notification_spawner (
 }
 
 #[tracing::instrument(skip(ctx))]
-async fn hour_before_notification_spawner (
-    event: Event,
-    ctx: Arc<Context>,
-){
+async fn hour_before_notification_spawner(event: Event, ctx: Arc<Context>) {
     info!("Spawned thread for hour before notification");
     #[cfg(debug_assertions)]
     tokio::time::sleep(Duration::from_secs(10)).await;
     loop {
-        let time_difference = event.start_time().signed_duration_since(Local::now().naive_local());
+        let time_difference = event
+            .start_time()
+            .signed_duration_since(Local::now().naive_local());
         if time_difference.num_hours() <= 1 {
             info!("{}: Hour before notification sending", event.event_title());
-            for user in event.guest_list().iter().filter(|s| s.notify_amount() > 0){
-                let user_id = UserId::new(user.user_id().parse().unwrap());
-                let discord_user = user_id.to_user(&ctx).await.unwrap();
-                discord_user.direct_message(&ctx.http, CreateMessage::new().content(format!("Hi, {}! {} is starting in just one hour! Check it out here -> https://eventstar.costionline.com/event/{}", discord_user.display_name(), event.event_title(), event.event_id()))).await.unwrap();
+            for user in event.guest_list().iter().filter(|s| s.notify_amount() > 0) {
+                match user.user_id().parse().map(|id| { UserId::new(id) }).map(|id| { id.to_user(&ctx) }) {
+                    Ok(id_future) => {
+                        match id_future.await {
+                            Ok(discord_user) => {
+                                match discord_user.direct_message(&ctx.http, CreateMessage::new().content(format!("Hi, {}! {} is starting in just one hour! Check it out here -> https://eventstar.costionline.com/event/{}", discord_user.display_name(), event.event_title(), event.event_id()))).await {
+                                    Ok(_) => {}
+                                    Err(err) => {
+                                        error!("Error sending message: {err:?}");
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                error!("Error converting user id into user: {err:?}");
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        error!("Error parsing user ID: {err:?}");
+                    }
+                };
                 rate_limit_delay().await;
             }
             info!("{}: Hour before notification finished", event.event_title());
@@ -250,24 +321,52 @@ async fn hour_before_notification_spawner (
 }
 
 #[tracing::instrument(skip(ctx))]
-async fn rsvp_hour_before_notification_spawner (
-    event: Event,
-    ctx: Arc<Context>,
-){
+async fn rsvp_hour_before_notification_spawner(event: Event, ctx: Arc<Context>) {
     info!("Spawned thread for rsvp due date notification");
     #[cfg(debug_assertions)]
     tokio::time::sleep(Duration::from_secs(15)).await;
     loop {
-        let time_difference = event.rsvp_due().signed_duration_since(Local::now().naive_local());
+        let time_difference = event
+            .rsvp_due()
+            .signed_duration_since(Local::now().naive_local());
         if time_difference.num_minutes() <= 60 {
-            info!("{}: rsvp_hour_before_notification_spawner sending", event.event_title());
-            for user in event.guest_list().iter().filter(|s| s.notify_amount() > 1).filter(|s| s.responded() == EventResponse::NoResponse){
-                let user_id = UserId::new(user.user_id().parse().unwrap());
-                let discord_user = user_id.to_user(&ctx).await.unwrap();
-                discord_user.direct_message(&ctx.http, CreateMessage::new().content(format!("Hi, {}! Your RSVP for {} is due in an hour. Check it out here -> https://eventstar.costionline.com/event/{}", discord_user.display_name(), event.event_title(), event.event_id()))).await.unwrap();
+            info!(
+                "{}: rsvp_hour_before_notification_spawner sending",
+                event.event_title()
+            );
+            for user in event
+                .guest_list()
+                .iter()
+                .filter(|s| s.notify_amount() > 1)
+                .filter(|s| s.responded() == EventResponse::NoResponse)
+            {
+                match user.user_id().parse().map(|id| { UserId::new(id) }).map(|id| { id.to_user(&ctx) }) {
+                    Ok(id_future) => {
+                        match id_future.await {
+                            Ok(discord_user) => {
+                                match discord_user.direct_message(&ctx.http, CreateMessage::new().content(format!("Hi, {}! Your RSVP for {} is due in an hour. Check it out here -> https://eventstar.costionline.com/event/{}", discord_user.display_name(), event.event_title(), event.event_id()))).await {
+                                    Ok(_) => {}
+                                    Err(err) => {
+                                        error!("Error sending message: {err:?}");
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                error!("Error converting user id into user: {err:?}");
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        error!("Error parsing user ID: {err:?}");
+                    }
+                };
+
                 rate_limit_delay().await;
             }
-            info!("{}: rsvp_hour_before_notification_spawner finished", event.event_title());
+            info!(
+                "{}: rsvp_hour_before_notification_spawner finished",
+                event.event_title()
+            );
             break;
         }
         tokio::time::sleep(Duration::from_secs(5)).await;

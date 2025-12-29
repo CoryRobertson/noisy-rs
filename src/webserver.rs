@@ -1,5 +1,4 @@
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use crate::bot::BotState;
 use crate::event::{ChangeRSVP, Event};
 use axum::body::Body;
 use axum::extract::{Path, State};
@@ -8,10 +7,11 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 use tokio::sync::broadcast::Sender;
 use tracing::{info, warn};
-use crate::bot::BotState;
 
 /// handles the webserver creation, basically just an input to the bot
 #[tracing::instrument]
@@ -35,19 +35,26 @@ async fn set_guest_response(
     State(state): State<Arc<WebserverState>>,
     Json(change_rsvp): Json<ChangeRSVP>,
 ) -> Response<Body> {
-    
     let rsvp = change_rsvp.clone();
     let mut lock = state.bot_state.events().lock().await;
-    let response = match lock.iter_mut().find(|e| e.event_id() == change_rsvp.event_id) {
+    let response = match lock
+        .iter_mut()
+        .find(|e| e.event_id() == change_rsvp.event_id)
+    {
         None => {
             tracing::log::warn!("{}: RSVP event not found", change_rsvp.event_id);
             Response::builder().status(501).body(Body::empty()).unwrap() // TODO: costi
         }
         Some(event) => {
-            match event.mut_guest_list().iter_mut().find(|g| g.user_id() == change_rsvp.user_id) {
+            match event
+                .mut_guest_list()
+                .iter_mut()
+                .find(|g| g.user_id() == change_rsvp.user_id)
+            {
                 None => {
                     tracing::log::warn!("{}: Invited guest not found", change_rsvp.event_id);
-                    Response::builder().status(500).body(Body::empty()).unwrap() // TODO: costi
+                    Response::builder().status(500).body(Body::empty()).unwrap()
+                    // TODO: costi
                 }
                 Some(guest) => {
                     guest.set_responded(change_rsvp.responded);
@@ -56,17 +63,14 @@ async fn set_guest_response(
             }
         }
     };
-    state
-        .sender
-        .send(Procedure::SetRSVP(rsvp))
-        .unwrap();
-    
+    state.sender.send(Procedure::SetRSVP(rsvp)).unwrap();
+
     response
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Embellishment {
-    logs: Vec<LogLine>
+    logs: Vec<LogLine>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -93,17 +97,18 @@ struct Span {
 }
 
 #[tracing::instrument]
-async fn return_logs(Path(page): Path<usize>) -> Json<Embellishment>{
+async fn return_logs(Path(page): Path<usize>) -> Json<Embellishment> {
     let file = File::open("logs/logs.log").unwrap();
     let br = BufReader::new(file);
-    let lines = br.lines()
-        .skip(page*500)
+    let lines = br
+        .lines()
+        .skip(page * 500)
         .take(500)
         .filter_map(|s| s.ok().map(|s| serde_json::from_str(&s).ok()).flatten())
         .collect::<Vec<LogLine>>();
 
     info!("Got {} log lines", lines.len());
-    let e: Embellishment = Embellishment{logs: lines};
+    let e: Embellishment = Embellishment { logs: lines };
 
     Json(e)
 }

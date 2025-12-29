@@ -4,13 +4,22 @@ use serenity::all::GatewayIntents;
 use serenity::Client;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::{env, fs};
+use std::{env, fs, io};
 use tokio::sync::Mutex;
+use tracing::{warn, Level};
+use tracing_subscriber::{fmt, Layer, Registry};
+use tracing_subscriber::layer::SubscriberExt;
 
 #[tokio::main]
 #[tracing::instrument]
 async fn main() {
-    tracing_subscriber::fmt::init();
+    let console = fmt::layer().pretty().with_writer(io::stdout).with_filter(tracing_subscriber::filter::LevelFilter::from_level(Level::INFO));
+    let file_appender = tracing_appender::rolling::never("./logs", "logs.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    let file = fmt::layer().json().with_writer(non_blocking).with_ansi(false).with_filter(tracing_subscriber::filter::LevelFilter::from_level(Level::INFO));
+    let subscriber = Registry::default().with(console).with(file);
+    tracing::subscriber::set_global_default(subscriber).expect("Unable to set a global subscriber");
+    // fmt::init();
 
     #[cfg(debug_assertions)]
     if option_env!("DEBUG_JSON").is_some() {

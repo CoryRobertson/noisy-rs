@@ -39,7 +39,7 @@ impl Guest {
 
         Some(
             Self {
-                user_id: user_id,
+                user_id,
                 notify_amount,
                 responded: EventResponse::NoResponse,
             }
@@ -135,7 +135,7 @@ impl Default for Event {
                 Guest::new("126161589291188224", 3).unwrap(),
             ],
             start_time: Local::now().naive_local(),
-            rsvp_due: Local::now().naive_local().add(TimeDelta::minutes(61)),
+            rsvp_due: Local::now().naive_local().add(TimeDelta::minutes(62)),
             end_time: NaiveDateTime::default().add(TimeDelta::hours(2)),
             notify_threads_spawned: false,
         }

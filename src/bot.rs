@@ -29,10 +29,16 @@ impl Handler {
             bot_state: BotState::new(rx),
         }
     }
+
+    pub fn bot_state(&self) -> &BotState {
+        &self.bot_state
+    }
 }
 
 #[async_trait]
 impl EventHandler for Handler {
+
+    #[tracing::instrument(skip(self, ctx, guilds))]
     async fn cache_ready(&self, ctx: Context, guilds: Vec<GuildId>) {
         info!("Cache built successfully!");
 
@@ -49,6 +55,7 @@ impl EventHandler for Handler {
         }
     }
 
+    #[tracing::instrument(skip(self, ctx))]
     async fn message(&self, ctx: Context, msg: Message) {
         if msg.content == "!ping" {
             if let Err(why) = msg.channel_id.say(&ctx.http, "Pong!").await {
@@ -71,6 +78,7 @@ impl EventHandler for Handler {
         }
     }
 
+    #[tracing::instrument(skip(self, _ctx, data_about_bot))]
     async fn ready(&self, _ctx: Context, data_about_bot: Ready) {
         info!("{} is connected!", data_about_bot.user.name);
     }
@@ -102,6 +110,10 @@ impl BotState {
             guilds: Arc::default(),
             events: Arc::default(),
         }
+    }
+
+    pub fn events(&self) -> &Arc<Mutex<Vec<Event>>> {
+        &self.events
     }
 }
 
@@ -137,7 +149,7 @@ async fn send_user_message(ctx: &Context, name: Event, message_id: Arc<Mutex<Opt
     todo!() // probably delete this code once we are sure there is nothing we want to pull from it
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(ctx, bot_state))]
 async fn setup_bot_threads(bot_state: BotState, ctx: Arc<Context>) {
     tokio::spawn(set_activity_to_current_time(ctx.clone()));
     tokio::spawn(react_to_procedures(bot_state.clone(), ctx.clone()));
@@ -167,31 +179,43 @@ async fn send_notifications(bot_state: BotState, ctx: Arc<Context>) {
     }
 }
 
+async fn rate_limit_delay() {
+    tokio::time::sleep(Duration::from_secs(1)).await;
+}
+
 #[tracing::instrument(skip(ctx))]
 async fn creation_notification_spawner(
     event: Event,
     ctx: Arc<Context>,
 ){
+    info!("Sending notification of new event creation");
     for user in event.guest_list().iter().filter(|s| s.notify_amount() > 0){
         let user_id = UserId::new(user.user_id().parse().unwrap());
         let discord_user = user_id.to_user(&ctx).await.unwrap();
         discord_user.direct_message(&ctx.http, CreateMessage::new().content(format!("Hi, {}! You are invited to {}. You can RSVP here -> https://eventstar.costionline.com/event/{}", discord_user.display_name(), event.event_title(), event.event_id()))).await.unwrap();
+
+        rate_limit_delay().await;
     }
 }
 
 #[tracing::instrument(skip(ctx))]
-async fn hour_before_notification_spawner (
+async fn day_before_notification_spawner (
     event: Event,
     ctx: Arc<Context>,
 ){
+
+    info!("Spawned thread for day before notification");
+    #[cfg(debug_assertions)]
+    tokio::time::sleep(Duration::from_secs(5)).await;
     loop {
         let time_difference = event.start_time().signed_duration_since(Local::now().naive_local());
-        if time_difference.num_days() <= 1 {
+        if time_difference.num_hours() <= 24 {
             info!("{}: Day before notification sending", event.event_title());
             for user in event.guest_list().iter().filter(|s| s.notify_amount() > 1){
                 let user_id = UserId::new(user.user_id().parse().unwrap());
                 let discord_user = user_id.to_user(&ctx).await.unwrap();
                 discord_user.direct_message(&ctx.http, CreateMessage::new().content(format!("Hi, {}! {} is tomorrow! Check it out here -> https://eventstar.costionline.com/event/{}", discord_user.display_name(), event.event_title(), event.event_id()))).await.unwrap();
+                rate_limit_delay().await;
             }
             info!("{}: Day before notification finished", event.event_title());
             break;
@@ -201,10 +225,13 @@ async fn hour_before_notification_spawner (
 }
 
 #[tracing::instrument(skip(ctx))]
-async fn day_before_notification_spawner (
+async fn hour_before_notification_spawner (
     event: Event,
     ctx: Arc<Context>,
 ){
+    info!("Spawned thread for hour before notification");
+    #[cfg(debug_assertions)]
+    tokio::time::sleep(Duration::from_secs(10)).await;
     loop {
         let time_difference = event.start_time().signed_duration_since(Local::now().naive_local());
         if time_difference.num_hours() <= 1 {
@@ -213,6 +240,7 @@ async fn day_before_notification_spawner (
                 let user_id = UserId::new(user.user_id().parse().unwrap());
                 let discord_user = user_id.to_user(&ctx).await.unwrap();
                 discord_user.direct_message(&ctx.http, CreateMessage::new().content(format!("Hi, {}! {} is starting in just one hour! Check it out here -> https://eventstar.costionline.com/event/{}", discord_user.display_name(), event.event_title(), event.event_id()))).await.unwrap();
+                rate_limit_delay().await;
             }
             info!("{}: Hour before notification finished", event.event_title());
             break;
@@ -226,16 +254,20 @@ async fn rsvp_hour_before_notification_spawner (
     event: Event,
     ctx: Arc<Context>,
 ){
+    info!("Spawned thread for rsvp due date notification");
+    #[cfg(debug_assertions)]
+    tokio::time::sleep(Duration::from_secs(15)).await;
     loop {
         let time_difference = event.rsvp_due().signed_duration_since(Local::now().naive_local());
-        if time_difference.num_hours() <= 1 {
-            info!("{}: Day before RSVP notification sending", event.event_title());
+        if time_difference.num_minutes() <= 60 {
+            info!("{}: rsvp_hour_before_notification_spawner sending", event.event_title());
             for user in event.guest_list().iter().filter(|s| s.notify_amount() > 1).filter(|s| s.responded() == EventResponse::NoResponse){
                 let user_id = UserId::new(user.user_id().parse().unwrap());
                 let discord_user = user_id.to_user(&ctx).await.unwrap();
                 discord_user.direct_message(&ctx.http, CreateMessage::new().content(format!("Hi, {}! Your RSVP for {} is due in an hour. Check it out here -> https://eventstar.costionline.com/event/{}", discord_user.display_name(), event.event_title(), event.event_id()))).await.unwrap();
+                rate_limit_delay().await;
             }
-            info!("{}: Day before RSVP notification finished", event.event_title());
+            info!("{}: rsvp_hour_before_notification_spawner finished", event.event_title());
             break;
         }
         tokio::time::sleep(Duration::from_secs(5)).await;
@@ -254,23 +286,7 @@ async fn react_to_procedures(mut bot_state: BotState, ctx: Arc<Context>) {
                         bot_state.events.lock().await.push(new_event);
                     }
                     Procedure::SetRSVP(rsvp) => {
-                        let mut lock = bot_state.events.lock().await;
-                        match lock.iter_mut().find(|e| e.event_id() == rsvp.event_id) {
-                            None => {
-                                warn!("{}: RSVP event not found", rsvp.event_id);
-                            }
-                            Some(event) => {
-                                match event.mut_guest_list().iter_mut().find(|g| g.user_id() == rsvp.user_id) {
-                                    None => {
-                                        warn!("{}: Invited guest not found", rsvp.event_id);
-                                    }
-                                    Some(guest) => {
-                                        guest.set_responded(rsvp.responded);
-                                    }
-                                }
-                            }
-                        }
-
+                        info!("RSVP bot procedure received: {rsvp:?}");
                     }
                 }
             }

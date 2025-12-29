@@ -9,6 +9,7 @@ use tokio::sync::Mutex;
 use tracing::{warn, Level};
 use tracing_subscriber::{fmt, Layer, Registry};
 use tracing_subscriber::layer::SubscriberExt;
+use noisy_rs::event::EventResponse;
 
 #[tokio::main]
 #[tracing::instrument]
@@ -60,10 +61,13 @@ async fn main() {
 fn output_debug_json() {
     let event = noisy_rs::event::Event::default();
     let guest = noisy_rs::event::Guest::new("cool_test_user", 1);
+    let change_rsvp = noisy_rs::event::ChangeRSVP{responded: EventResponse::Going, event_id: "123".to_string(), user_id: "234".to_string()};
 
     let json_event = serde_json::to_string(&event).unwrap();
     let json_guest = serde_json::to_string(&guest).unwrap();
+    let json_change_rsvp = serde_json::to_string(&change_rsvp).unwrap();
 
     fs::write("event.json", json_event).unwrap();
     fs::write("guest.json", json_guest).unwrap();
+    fs::write("changeRsvp.json", json_change_rsvp).unwrap();
 }

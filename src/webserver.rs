@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use crate::event::Event;
+use crate::event::{ChangeRSVP, Event};
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{header, Response};
@@ -18,6 +18,7 @@ use tracing::warn;
 pub async fn start_webserver(sender: Sender<Procedure>) {
     let app = Router::new()
         .route("/new_event", post(handle_new_event))
+        .route("/set_guest_response", post(set_guest_response))
         .route("/get_logs/{page}", get(return_logs))
         .route("/test_page", get(test_page))
         .with_state(Arc::new(WebserverState {
@@ -26,6 +27,19 @@ pub async fn start_webserver(sender: Sender<Procedure>) {
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn set_guest_response(
+    State(state): State<Arc<WebserverState>>,
+    Json(change_rsvp): Json<ChangeRSVP>,
+) -> Response<Body> {
+    #[cfg(debug_assertions)]
+    state
+        .sender
+        .send(Procedure::SetRSVP(change_rsvp))
+        .unwrap();
+
+    Response::builder().status(200).body(Body::empty()).unwrap()
 }
 
 #[derive(Serialize, Deserialize)]
@@ -104,4 +118,5 @@ pub struct WebserverState {
 pub enum Procedure {
     /// Creates a new event that is tracked by the bot
     NewEvent(Event),
+    SetRSVP(ChangeRSVP),
 }

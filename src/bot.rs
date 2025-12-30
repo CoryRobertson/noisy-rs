@@ -1,18 +1,15 @@
-use crate::event::{Event, EventResponse, Guest};
+use crate::event::{Event, EventResponse};
 use crate::webserver::Procedure;
-use chrono::{DateTime, Local, Utc};
+use chrono::{Local, Utc};
 use serenity::all::{ActivityData, Channel, Context, CreateMessage, EventHandler, GuildId, Message, MessageBuilder, Ready, UserId};
-use serenity::{async_trait, FutureExt};
-use std::any::Any;
-use std::future::Future;
+use serenity::{async_trait};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use serenity::builder::GetMessages;
-use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::Mutex;
-use tracing::log::{debug, error, info, warn};
+use tracing::log::{error, info, warn};
 
 /// this is the bot handler
 #[derive(Debug)]
@@ -58,12 +55,6 @@ impl EventHandler for Handler {
 
     #[tracing::instrument(skip(self, ctx))]
     async fn message(&self, ctx: Context, msg: Message) {
-        if msg.content == "!ping" {
-            if let Err(why) = msg.channel_id.say(&ctx.http, "Pong!").await {
-                error!("Error sending message: {why:?}");
-            }
-        }
-
         match msg.content.as_str() {
             "!clear" => {
                 if let Ok(channel) = msg.channel(&ctx.http).await {
@@ -88,21 +79,25 @@ impl EventHandler for Handler {
                     }
                 }
             }
-            _ => {}
-        }
-
-        if msg.content == "!setup" {
-            let builder = MessageBuilder::new()
-                .push("React to test this stuff!")
-                .build();
-            match msg.channel_id.say(&ctx.http, builder).await {
-                Ok(message_sent) => {
-                    if let Err(err) = message_sent.react(ctx.http, '😀').await {
-                        error!("Error reacting to message: {err:?}");
+            "!setup" => {
+                let builder = MessageBuilder::new()
+                    .push("React to test this stuff!")
+                    .build();
+                match msg.channel_id.say(&ctx.http, builder).await {
+                    Ok(message_sent) => {
+                        if let Err(err) = message_sent.react(ctx.http, '😀').await {
+                            error!("Error reacting to message: {err:?}");
+                        }
                     }
+                    Err(why) => error!("Error sending message: {why:?}"),
                 }
-                Err(why) => error!("Error sending message: {why:?}"),
             }
+            "!ping" => {
+                if let Err(why) = msg.channel_id.say(&ctx.http, "Pong!").await {
+                    error!("Error sending message: {why:?}");
+                }
+            }
+            _ => {}
         }
     }
 
@@ -145,7 +140,8 @@ impl BotState {
     }
 }
 
-async fn send_user_message(ctx: &Context, name: Event, message_id: Arc<Mutex<Option<Message>>>) {
+#[allow(dead_code)]
+async fn send_user_message(ctx: &Context, _name: Event, message_id: Arc<Mutex<Option<Message>>>) {
     let lock = message_id.lock().await;
 
     match lock.clone() {
@@ -373,8 +369,8 @@ async fn rsvp_hour_before_notification_spawner(event: Event, ctx: Arc<Context>) 
     }
 }
 
-#[tracing::instrument(skip(ctx, bot_state))]
-async fn react_to_procedures(mut bot_state: BotState, ctx: Arc<Context>) {
+#[tracing::instrument(skip(_ctx, bot_state))]
+async fn react_to_procedures(mut bot_state: BotState, _ctx: Arc<Context>) {
     loop {
         match bot_state.receiver.recv().await {
             Ok(procedure) => {

@@ -1,6 +1,5 @@
 use chrono::{Local, NaiveDateTime, TimeDelta};
 use serde::{Deserialize, Serialize};
-use serenity::futures::future::ok;
 use std::ops::Add;
 use tracing::error;
 
@@ -33,7 +32,7 @@ impl Guest {
         }
 
         if notify_amount > 3 {
-            error!("Guest user {user_id} cannot have notify amount of {notify_amount}. Excluding from list.");
+            error!("Guest user {user_id} cannot have notify_amount of {notify_amount}. Excluding from list.");
             return None;
         }
 

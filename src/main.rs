@@ -3,14 +3,11 @@ use noisy_rs::event::EventResponse;
 use noisy_rs::webserver;
 use serenity::all::GatewayIntents;
 use serenity::Client;
-use std::thread::sleep;
-use std::time::Duration;
-use std::{env, fs, io};
-use tracing::{error, info, warn, Level};
-use tracing_subscriber::fmt::SubscriberBuilder;
+use std::{env, fs};
+use tracing::{warn};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{fmt, Layer, Registry};
+use tracing_subscriber::{fmt};
 
 #[tokio::main]
 #[tracing::instrument]

@@ -2,7 +2,7 @@ use crate::bot::BotState;
 use crate::event::{ChangeRSVP, Event};
 use axum::body::Body;
 use axum::extract::{Path, State};
-use axum::http::{header, Response};
+use axum::http::{Response};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};

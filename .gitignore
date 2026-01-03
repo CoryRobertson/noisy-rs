@@ -16,3 +16,4 @@ Cargo.lock
 /guest.json
 /logs/logs.log
 /changeRsvp.json
+/persistent_save.json

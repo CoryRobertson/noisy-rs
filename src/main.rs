@@ -4,7 +4,7 @@ use noisy_rs::webserver;
 use serenity::all::GatewayIntents;
 use serenity::Client;
 use std::{env, fs};
-use tracing::{warn};
+use tracing::{error, info, warn};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt};
@@ -47,15 +47,20 @@ async fn main() {
         .event_handler(bot_event_handler)
         .await
         .expect("Err creating client");
-
-    let webserver = tokio::spawn(webserver::start_webserver(procedure_sender, bot_state));
-
-    if let Err(why) = client.start().await {
-        println!("Client error: {:?}", why);
-        webserver.abort();
+    
+    tokio::select! {
+        res_client = client.start() => {
+            if let Err(why) = res_client {
+                error!("Client error: {:?}", why);
+            }
+        }
+        _ = webserver::start_webserver(procedure_sender, bot_state) => {
+            error!("Webserver future finished, this is not intended to happen");
+        }
+        _ = tokio::signal::ctrl_c() => {
+            info!("Ctrl-C received, shutting down...");
+        }
     }
-
-    webserver.await.unwrap();
 }
 
 #[cfg(debug_assertions)]

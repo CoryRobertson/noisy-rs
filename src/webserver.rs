@@ -1,4 +1,3 @@
-use crate::bot::BotState;
 use crate::event::{ChangeRSVP, Event};
 use axum::body::Body;
 use axum::extract::{Path, State};
@@ -12,6 +11,7 @@ use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 use tokio::sync::broadcast::Sender;
 use tracing::{info, warn};
+use crate::bot::BotState;
 
 /// handles the webserver creation, basically just an input to the bot
 #[tracing::instrument]
@@ -36,8 +36,10 @@ async fn set_guest_response(
     Json(change_rsvp): Json<ChangeRSVP>,
 ) -> Response<Body> {
     let rsvp = change_rsvp.clone();
-    let mut lock = state.bot_state.events().lock().await;
-    let response = match lock
+    let bsd = state.bot_state.bot_state_data();
+    let mut lock = bsd.lock().await;
+    let lock_events = lock.events_mut();
+    let response = match lock_events
         .iter_mut()
         .find(|e| e.event_id() == change_rsvp.event_id)
     {

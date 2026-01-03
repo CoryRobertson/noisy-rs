@@ -1,28 +1,37 @@
+use std::fs::File;
+use std::io::{Read, Write};
 use crate::event::{Event, EventResponse};
 use crate::webserver::Procedure;
 use chrono::{Local, Utc};
 use serenity::all::{ActivityData, Channel, Context, CreateMessage, EventHandler, GuildId, Message, MessageBuilder, Ready, UserId};
-use serenity::{async_trait};
-use std::sync::atomic::{AtomicBool, Ordering};
+use serenity::async_trait;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use serde::{Deserialize, Serialize};
 use serenity::builder::GetMessages;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::Mutex;
 use tracing::log::{error, info, warn};
+
+mod notifications;
+mod bot_state;
+
+pub use bot_state::BotState;
+
 
 /// this is the bot handler
 #[derive(Debug)]
 pub struct Handler {
     /// this is a boolean that checks if we have already spawned the threads that the bot use
     thread_running: AtomicBool,
+    /// The state of the bot that may be needed across threads
+    /// This struct is clonable with minimal cost
     bot_state: BotState,
 }
 
 impl Handler {
     pub fn new(rx: Receiver<Procedure>) -> Self {
-        // TODO: if we need to persist any data, we should do it here, where we check for a file that we care about, then deserialize it, and if it ends up being not present or no good, then we use a default value
-
         Self {
             thread_running: AtomicBool::new(false),
             bot_state: BotState::new(rx),
@@ -34,6 +43,19 @@ impl Handler {
     }
 }
 
+#[tracing::instrument(skip(ctx, bot_state))]
+/// Spawns threads that the bot will use to do the following:
+/// Set the current time in the bots about me on discord
+/// React to procedures sent by the webserver
+/// Spawn notification threads when needed
+async fn setup_bot_threads(bot_state: BotState, ctx: Arc<Context>) {
+    tokio::spawn(set_activity_to_current_time(ctx.clone()));
+    tokio::spawn(react_to_procedures(bot_state.clone(), ctx.clone()));
+    tokio::spawn(notifications::spawn_notification_threads(bot_state.clone(), ctx.clone()));
+    // TODO: make a async future that loops through the bot state events, checks which events have happened more than one day ago, and then delete them from the list.
+    info!("Finished spawning bot threads");
+}
+
 #[async_trait]
 impl EventHandler for Handler {
     #[tracing::instrument(skip(self, ctx, guilds))]
@@ -41,7 +63,7 @@ impl EventHandler for Handler {
         info!("Cache built successfully!");
 
         // Store a copy of all the guilds that the bot is connected to, so we can reference them in the future
-        *self.bot_state.guilds.lock().await = guilds;
+        self.bot_state.bot_state_data().lock().await.guilds = guilds;
 
         // this context clone is so the async threads can have access to their own bot contexts
         let ctx = Arc::new(ctx);
@@ -107,40 +129,8 @@ impl EventHandler for Handler {
     }
 }
 
-#[derive(Debug)]
-pub struct BotState {
-    /// this is a web event receiver that will prompt the bot to message all users
-    receiver: Receiver<Procedure>,
-    /// A vector of all the guilds that the bot is connected to
-    guilds: Arc<Mutex<Vec<GuildId>>>,
-    events: Arc<Mutex<Vec<Event>>>,
-}
-
-impl Clone for BotState {
-    fn clone(&self) -> Self {
-        Self {
-            receiver: self.receiver.resubscribe(),
-            guilds: self.guilds.clone(),
-            events: self.events.clone(),
-        }
-    }
-}
-
-impl BotState {
-    pub fn new(receiver: Receiver<Procedure>) -> Self {
-        Self {
-            receiver,
-            guilds: Arc::default(),
-            events: Arc::default(),
-        }
-    }
-
-    pub fn events(&self) -> &Arc<Mutex<Vec<Event>>> {
-        &self.events
-    }
-}
-
 #[allow(dead_code)]
+/// Unused function that was used to demonstrate what things we might need
 async fn send_user_message(ctx: &Context, _name: Event, message_id: Arc<Mutex<Option<Message>>>) {
     let lock = message_id.lock().await;
 
@@ -173,212 +163,23 @@ async fn send_user_message(ctx: &Context, _name: Event, message_id: Arc<Mutex<Op
     todo!() // probably delete this code once we are sure there is nothing we want to pull from it
 }
 
-#[tracing::instrument(skip(ctx, bot_state))]
-async fn setup_bot_threads(bot_state: BotState, ctx: Arc<Context>) {
-    tokio::spawn(set_activity_to_current_time(ctx.clone()));
-    tokio::spawn(react_to_procedures(bot_state.clone(), ctx.clone()));
-    tokio::spawn(send_notifications(bot_state.clone(), ctx.clone()));
-    info!("Finished spawning bot threads");
-}
 
-#[tracing::instrument(skip(ctx, bot_state))]
-async fn send_notifications(bot_state: BotState, ctx: Arc<Context>) {
-    loop {
-        {
-            let mut lock = bot_state.events.lock().await;
-            for event in lock.iter_mut() {
-                if !event.notify_threads_spawned() {
-                    event.set_notify_threads_spawned(true);
-
-                    tokio::spawn(creation_notification_spawner(event.clone(), ctx.clone()));
-                    tokio::spawn(hour_before_notification_spawner(event.clone(), ctx.clone()));
-                    tokio::spawn(day_before_notification_spawner(event.clone(), ctx.clone()));
-                    tokio::spawn(rsvp_hour_before_notification_spawner(event.clone(), ctx.clone()));
-                    // TODO: more notifications ??
-                }
-            }
-        }
-        tokio::time::sleep(Duration::from_secs(5)).await;
-    }
-}
-
-async fn rate_limit_delay() {
+/// A common function that will delay the bot by a set amount, this is a common function because we want all rate limiting to be done with the same function so it can share data if it needs to
+pub(super) async fn rate_limit_delay() {
     tokio::time::sleep(Duration::from_secs(1)).await;
 }
 
-#[tracing::instrument(skip(ctx))]
-async fn creation_notification_spawner(event: Event, ctx: Arc<Context>) {
-    info!("Sending notification of new event creation");
-    for user in event.guest_list().iter().filter(|s| s.notify_amount() > 0) {
-        match user.user_id().parse().map(|id| { UserId::new(id) }).map(|id| { id.to_user(&ctx) }) {
-            Ok(id_future) => {
-                match id_future.await {
-                    Ok(discord_user) => {
-                        match discord_user.direct_message(&ctx.http, CreateMessage::new().content(format!("Hi, {}! You are invited to {}. You can RSVP here -> https://eventstar.costionline.com/event/{}", discord_user.display_name(), event.event_title(), event.event_id()))).await {
-                            Ok(_) => {}
-                            Err(err) => {
-                                error!("Error sending message: {err:?}");
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        error!("Error converting user id into user: {err:?}");
-                    }
-                }
-            }
-            Err(err) => {
-                error!("Error parsing user ID: {err:?}");
-            }
-        };
-        rate_limit_delay().await;
-    }
-}
-
-#[tracing::instrument(skip(ctx))]
-async fn day_before_notification_spawner(event: Event, ctx: Arc<Context>) {
-    info!("Spawned thread for day before notification");
-    #[cfg(debug_assertions)]
-    tokio::time::sleep(Duration::from_secs(5)).await;
-    loop {
-        let time_difference = event
-            .start_time()
-            .signed_duration_since(Local::now().naive_local());
-        if time_difference.num_hours() <= 24 {
-            info!("{}: Day before notification sending", event.event_title());
-            for user in event.guest_list().iter().filter(|s| s.notify_amount() > 1) {
-                match user.user_id().parse().map(|id| { UserId::new(id) }).map(|id| { id.to_user(&ctx) }) {
-                    Ok(id_future) => {
-                        match id_future.await {
-                            Ok(discord_user) => {
-                                match discord_user.direct_message(&ctx.http, CreateMessage::new().content(format!("Hi, {}! {} is tomorrow! Check it out here -> https://eventstar.costionline.com/event/{}", discord_user.display_name(), event.event_title(), event.event_id()))).await {
-                                    Ok(_) => {}
-                                    Err(err) => {
-                                        error!("Error sending message: {err:?}");
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                error!("Error converting user id into user: {err:?}");
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        error!("Error parsing user ID: {err:?}");
-                    }
-                };
-                rate_limit_delay().await;
-            }
-            info!("{}: Day before notification finished", event.event_title());
-            break;
-        }
-        tokio::time::sleep(Duration::from_secs(5)).await;
-    }
-}
-
-#[tracing::instrument(skip(ctx))]
-async fn hour_before_notification_spawner(event: Event, ctx: Arc<Context>) {
-    info!("Spawned thread for hour before notification");
-    #[cfg(debug_assertions)]
-    tokio::time::sleep(Duration::from_secs(10)).await;
-    loop {
-        let time_difference = event
-            .start_time()
-            .signed_duration_since(Local::now().naive_local());
-        if time_difference.num_hours() <= 1 {
-            info!("{}: Hour before notification sending", event.event_title());
-            for user in event.guest_list().iter().filter(|s| s.notify_amount() > 0) {
-                match user.user_id().parse().map(|id| { UserId::new(id) }).map(|id| { id.to_user(&ctx) }) {
-                    Ok(id_future) => {
-                        match id_future.await {
-                            Ok(discord_user) => {
-                                match discord_user.direct_message(&ctx.http, CreateMessage::new().content(format!("Hi, {}! {} is starting in just one hour! Check it out here -> https://eventstar.costionline.com/event/{}", discord_user.display_name(), event.event_title(), event.event_id()))).await {
-                                    Ok(_) => {}
-                                    Err(err) => {
-                                        error!("Error sending message: {err:?}");
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                error!("Error converting user id into user: {err:?}");
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        error!("Error parsing user ID: {err:?}");
-                    }
-                };
-                rate_limit_delay().await;
-            }
-            info!("{}: Hour before notification finished", event.event_title());
-            break;
-        }
-        tokio::time::sleep(Duration::from_secs(5)).await;
-    }
-}
-
-#[tracing::instrument(skip(ctx))]
-async fn rsvp_hour_before_notification_spawner(event: Event, ctx: Arc<Context>) {
-    info!("Spawned thread for rsvp due date notification");
-    #[cfg(debug_assertions)]
-    tokio::time::sleep(Duration::from_secs(15)).await;
-    loop {
-        let time_difference = event
-            .rsvp_due()
-            .signed_duration_since(Local::now().naive_local());
-        if time_difference.num_minutes() <= 60 {
-            info!(
-                "{}: rsvp_hour_before_notification_spawner sending",
-                event.event_title()
-            );
-            for user in event
-                .guest_list()
-                .iter()
-                .filter(|s| s.notify_amount() > 1)
-                .filter(|s| s.responded() == EventResponse::NoResponse)
-            {
-                match user.user_id().parse().map(|id| { UserId::new(id) }).map(|id| { id.to_user(&ctx) }) {
-                    Ok(id_future) => {
-                        match id_future.await {
-                            Ok(discord_user) => {
-                                match discord_user.direct_message(&ctx.http, CreateMessage::new().content(format!("Hi, {}! Your RSVP for {} is due in an hour. Check it out here -> https://eventstar.costionline.com/event/{}", discord_user.display_name(), event.event_title(), event.event_id()))).await {
-                                    Ok(_) => {}
-                                    Err(err) => {
-                                        error!("Error sending message: {err:?}");
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                error!("Error converting user id into user: {err:?}");
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        error!("Error parsing user ID: {err:?}");
-                    }
-                };
-
-                rate_limit_delay().await;
-            }
-            info!(
-                "{}: rsvp_hour_before_notification_spawner finished",
-                event.event_title()
-            );
-            break;
-        }
-        tokio::time::sleep(Duration::from_secs(5)).await;
-    }
-}
-
 #[tracing::instrument(skip(_ctx, bot_state))]
+/// Bot thread that awaits procedures from the webserver and handles them accordingly
 async fn react_to_procedures(mut bot_state: BotState, _ctx: Arc<Context>) {
     loop {
-        match bot_state.receiver.recv().await {
+        match bot_state.receiver_mut().recv().await {
             Ok(procedure) => {
                 info!("New procedure received: {procedure:?}");
 
                 match procedure {
                     Procedure::NewEvent(new_event) => {
-                        bot_state.events.lock().await.push(new_event);
+                        bot_state.bot_state_data().lock().await.events.push(new_event);
                     }
                     Procedure::SetRSVP(rsvp) => {
                         info!("RSVP bot procedure received: {rsvp:?}");
@@ -395,6 +196,7 @@ async fn react_to_procedures(mut bot_state: BotState, _ctx: Arc<Context>) {
 }
 
 #[tracing::instrument(skip(ctx))]
+/// Bot thread that sets the current time to the bots discord about me section on a fixed delay
 async fn set_activity_to_current_time(ctx: Arc<Context>) {
     loop {
         let current_time = Utc::now();

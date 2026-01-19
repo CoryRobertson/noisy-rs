@@ -1,4 +1,4 @@
-use crate::event::{ChangeRSVP, Event};
+use crate::event::{ChangeRSVP, Event, Guest};
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{Response};
@@ -30,6 +30,7 @@ pub async fn start_webserver(sender: Sender<Procedure>, bot_state: BotState) {
     axum::serve(listener, app).await.unwrap();
 }
 
+/// Sets the guest's RSVP response and the notification amount
 #[tracing::instrument]
 async fn set_guest_response(
     State(state): State<Arc<WebserverState>>,
@@ -45,7 +46,7 @@ async fn set_guest_response(
     {
         None => {
             tracing::log::warn!("{}: RSVP event not found", change_rsvp.event_id);
-            Response::builder().status(501).body(Body::empty()).unwrap() // TODO: costi
+            Response::builder().status(400).body(Body::empty()).unwrap()
         }
         Some(event) => {
             match event
@@ -55,11 +56,16 @@ async fn set_guest_response(
             {
                 None => {
                     tracing::log::warn!("{}: Invited guest not found", change_rsvp.event_id);
-                    Response::builder().status(500).body(Body::empty()).unwrap()
-                    // TODO: costi
+
+                    let mut new_guest = Guest::new(rsvp.clone().user_id, rsvp.notify_amount).unwrap();
+                    new_guest.set_responded(rsvp.clone().responded);
+
+                    event.mut_guest_list().push(new_guest);
+                    Response::builder().status(203).body(Body::empty()).unwrap()
                 }
                 Some(guest) => {
                     guest.set_responded(change_rsvp.responded);
+                    guest.set_notify_amount(change_rsvp.notify_amount);
                     Response::builder().status(200).body(Body::empty()).unwrap()
                 }
             }

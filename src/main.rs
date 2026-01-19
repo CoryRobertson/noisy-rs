@@ -72,6 +72,7 @@ fn output_debug_json() {
         responded: EventResponse::Going,
         event_id: "123".to_string(),
         user_id: "234".to_string(),
+        notify_amount: 3,
     };
 
     let json_event = serde_json::to_string(&event).unwrap();

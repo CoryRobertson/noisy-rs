@@ -2,7 +2,6 @@ use chrono::{Local, NaiveDateTime, TimeDelta};
 use serde::{Deserialize, Serialize};
 use std::ops::Add;
 use tracing::error;
-
 #[derive(Clone, Deserialize, Serialize, Debug)]
 pub struct Guest {
     user_id: String,
@@ -58,6 +57,10 @@ impl Guest {
     pub fn set_responded(&mut self, responded: EventResponse) {
         self.responded = responded;
     }
+
+    pub fn set_notify_amount(&mut self, notify_amount: u32) {
+        self.notify_amount = notify_amount;
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug)]
@@ -65,6 +68,7 @@ pub struct ChangeRSVP {
     pub event_id: String,
     pub user_id: String,
     pub responded: EventResponse,
+    pub notify_amount: u32,
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug)]

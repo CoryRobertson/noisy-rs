@@ -3,13 +3,14 @@ use std::io::{Read, Write};
 use crate::event::{Event, EventResponse};
 use crate::webserver::Procedure;
 use chrono::{Local, Utc};
-use serenity::all::{ActivityData, Channel, Context, CreateMessage, EventHandler, GuildId, Message, MessageBuilder, Ready, UserId};
+use serenity::all::{ActivityData, Channel, Context, CreateMessage, EventHandler, GuildId, Member, Message, MessageBuilder, Ready, UserId};
 use serenity::async_trait;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serenity::builder::GetMessages;
+use serenity::futures::StreamExt;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::Mutex;
 use tracing::log::{error, info, warn};
@@ -64,6 +65,7 @@ impl EventHandler for Handler {
 
         // Store a copy of all the guilds that the bot is connected to, so we can reference them in the future
         self.bot_state.bot_state_data().lock().await.guilds = guilds;
+        let _ = self.bot_state.bot_context().lock().await.insert(Arc::new(ctx.clone()));
 
         // this context clone is so the async threads can have access to their own bot contexts
         let ctx = Arc::new(ctx);
@@ -77,7 +79,7 @@ impl EventHandler for Handler {
 
     #[tracing::instrument(skip(self, ctx))]
     async fn message(&self, ctx: Context, msg: Message) {
-        match msg.content.as_str() {
+        match msg.content.to_lowercase().as_str() {
             "!clear" => {
                 if let Ok(channel) = msg.channel(&ctx.http).await {
                     match channel {
@@ -113,6 +115,19 @@ impl EventHandler for Handler {
                     }
                     Err(why) => error!("Error sending message: {why:?}"),
                 }
+            }
+            "!verifyusername" => {
+                // TODO: pre wrote but none of this seems to be needed? diagram?
+                todo!()
+                // let bsd = self.bot_state.bot_state_data();
+                // let mut lock = bsd.lock().await;
+                // 
+                // if let Some((idx,(found_user, random_number))) = lock.waiting_to_verify.iter().cloned().enumerate().find(|(_,(waiting, _))| waiting.id == msg.author.id) {
+                //     lock.waiting_to_verify.remove(idx);
+                //     info!("Found user waiting to verify in waiting list, removing from list");
+                // 
+                // 
+                // }
             }
             "!ping" => {
                 if let Err(why) = msg.channel_id.say(&ctx.http, "Pong!").await {
@@ -193,6 +208,30 @@ async fn react_to_procedures(mut bot_state: BotState, _ctx: Arc<Context>) {
 
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
+}
+
+pub async fn find_discord_user_with_name(username: &str, ctx: Arc<Context>, bot_state: BotState) -> Vec<Member> {
+    let bsd = bot_state.bot_state_data().clone();
+    let lock = bsd.lock().await;
+    let searched = lock.guilds.iter()
+        .map(|g| {g.search_members(&ctx.http,username,None)});
+
+    let mut users_found = vec![];
+
+    for search in searched {
+        let search_result = search.await;
+        match search_result {
+            Ok(found) => {
+                users_found.extend_from_slice(&found);
+            }
+            Err(err) => {
+                error!("Error searching for members: {err:?}, with username: {}", username);
+            }
+        }
+    }
+
+    info!("Found {} users with username or nickname of: {}", users_found.len(), username);
+    users_found
 }
 
 #[tracing::instrument(skip(ctx))]

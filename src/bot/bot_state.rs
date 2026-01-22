@@ -2,40 +2,41 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use cr_lommy::Getters;
 use tracing::log::{error, info};
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::Mutex;
 use serde::{Deserialize, Serialize};
-use serenity::all::GuildId;
+use serenity::all::{GuildId, User};
+use serenity::prelude::Context;
 use crate::event::Event;
 use crate::webserver::Procedure;
 
-#[derive(Debug)]
+#[derive(Debug, Getters)]
 pub struct BotState {
     /// this is a web event receiver that will prompt the bot to message all users
     receiver: Receiver<Procedure>,
+    #[getters_lommy_skip]
     bot_state_data: Arc<Mutex<BotStateData>>,
+    bot_context: Mutex<Option<Arc<Context>>>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Getters)]
 pub struct BotStateData {
     /// A vector of all the guilds that the bot is connected to
     pub(super) guilds: Vec<GuildId>,
     pub(super) events: Vec<Event>,
+    #[serde(skip)]
+    pub waiting_to_verify: Vec<(User, u32)>,
 }
 
 impl BotStateData {
-    pub fn guilds(&self) -> &Vec<GuildId> {
-        &self.guilds
-    }
 
     pub fn guilds_mut(&mut self) -> &mut Vec<GuildId> {
         &mut self.guilds
     }
 
-    pub fn events(&self) -> &Vec<Event> {
-        &self.events
-    }
+
 
     pub fn events_mut (&mut self) -> &mut Vec<Event> {
         &mut self.events
@@ -73,6 +74,7 @@ impl Clone for BotState {
         Self {
             receiver: self.receiver.resubscribe(),
             bot_state_data: self.bot_state_data.clone(),
+            bot_context: Mutex::new(None),
         }
     }
 }
@@ -108,6 +110,7 @@ impl BotState {
                 Self {
                     receiver,
                     bot_state_data: Arc::new(Mutex::new(data)),
+                    bot_context: Mutex::new(None),
                 }
             }
             _ => {
@@ -115,6 +118,7 @@ impl BotState {
                 Self {
                     receiver,
                     bot_state_data: Arc::new(Mutex::new(BotStateData::default())),
+                    bot_context: Mutex::new(None),
                 }
             }
         }
@@ -128,7 +132,5 @@ impl BotState {
         &mut self.receiver
     }
 
-    pub fn receiver(&self) -> &Receiver<Procedure> {
-        &self.receiver
-    }
+
 }

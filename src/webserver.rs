@@ -9,18 +9,21 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::sync::Arc;
+use serenity::all::CreateMessage;
 use tokio::sync::broadcast::Sender;
 use tracing::{info, warn};
-use crate::bot::BotState;
+use crate::bot::{find_discord_user_with_name, BotState};
 
 /// handles the webserver creation, basically just an input to the bot
 #[tracing::instrument]
 pub async fn start_webserver(sender: Sender<Procedure>, bot_state: BotState) {
+    info!("Starting webserver");
     let app = Router::new()
         .route("/new_event", post(handle_new_event))
         .route("/set_guest_response", post(set_guest_response))
         .route("/get_logs/{page}", get(return_logs))
         .route("/test_page", get(test_page))
+        .route("/verify_username/{username}", get(start_verify_username))
         .with_state(Arc::new(WebserverState {
             sender: sender.clone(),
             bot_state,
@@ -30,12 +33,49 @@ pub async fn start_webserver(sender: Sender<Procedure>, bot_state: BotState) {
     axum::serve(listener, app).await.unwrap();
 }
 
+#[tracing::instrument]
+async fn start_verify_username(
+    State(state): State<Arc<WebserverState>>,
+    Path(discord_username): Path<String>,
+    Path(random_number): Path<u32>,
+) -> Response<Body> {
+    info!("Starting verification of discord username: {}", discord_username);
+
+    let ctx = state.bot_state.bot_context()
+        .lock().await.clone()
+        .expect("Bot context not present, this should never be able to happen!");
+
+    let found_users = find_discord_user_with_name(&discord_username,ctx.clone(),state.bot_state.clone()).await;
+    if found_users.len() > 2 {
+        warn!("Found more than 2 users with discord username: {}", discord_username);
+    }
+
+    let bsd = state.bot_state.bot_state_data().clone();
+    let mut lock = bsd.lock().await;
+
+    for mem in found_users {
+        let _ = mem.user.direct_message(&ctx.http,CreateMessage::new().content(format!("Your verification code is: {}", random_number))).await;
+
+        // TODO: probably dont need this? unsure
+        // add user to verification list if they are not already present
+        // if lock.waiting_to_verify().iter().find(|(u,_)| u.id.clone() == mem.user.id.clone()).is_none() {
+        //     lock.waiting_to_verify.push((mem.user, random_number));
+        // }
+    }
+
+
+
+    Response::builder().status(200).body(Body::empty()).unwrap()
+}
+
+
 /// Sets the guest's RSVP response and the notification amount
 #[tracing::instrument]
 async fn set_guest_response(
     State(state): State<Arc<WebserverState>>,
     Json(change_rsvp): Json<ChangeRSVP>,
 ) -> Response<Body> {
+    info!("Setting guest response: {:?}", change_rsvp);
     let rsvp = change_rsvp.clone();
     let bsd = state.bot_state.bot_state_data();
     let mut lock = bsd.lock().await;
@@ -64,6 +104,7 @@ async fn set_guest_response(
                     Response::builder().status(203).body(Body::empty()).unwrap()
                 }
                 Some(guest) => {
+                    info!("Found event and guest: {:?}", guest);
                     guest.set_responded(change_rsvp.responded);
                     guest.set_notify_amount(change_rsvp.notify_amount);
                     Response::builder().status(200).body(Body::empty()).unwrap()
@@ -115,7 +156,7 @@ async fn return_logs(Path(page): Path<usize>) -> Json<Embellishment> {
         .filter_map(|s| s.ok().map(|s| serde_json::from_str(&s).ok()).flatten())
         .collect::<Vec<LogLine>>();
 
-    info!("Got {} log lines", lines.len());
+    info!("Got {} log lines from page: {}", lines.len(), page);
     let e: Embellishment = Embellishment { logs: lines };
 
     Json(e)
@@ -138,6 +179,7 @@ async fn handle_new_event(
     State(state): State<Arc<WebserverState>>,
     Json(event): Json<Event>,
 ) -> Response<Body> {
+    info!("Adding new event: {:?}", event);
     let _ = state.sender.send(Procedure::NewEvent(event));
 
     Response::builder().status(200).body(Body::empty()).unwrap()

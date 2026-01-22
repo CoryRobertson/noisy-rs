@@ -61,6 +61,7 @@ async fn start_verify_username(
         // if lock.waiting_to_verify().iter().find(|(u,_)| u.id.clone() == mem.user.id.clone()).is_none() {
         //     lock.waiting_to_verify.push((mem.user, random_number));
         // }
+        // TODO: we can make a post request or get request with the found usernames and the random number we sent them to event star
     }
 
 

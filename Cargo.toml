@@ -1,12 +1,12 @@
 [package]
 name = "noisy-rs"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serenity = "0.12.4"
+serenity = "0.12"
 tokio = { version = "1.48", features = ["rt-multi-thread", "signal"] }
 chrono = "0.4"
 axum = "0.8"
@@ -15,3 +15,4 @@ serde_json = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "tracing-log", "tracing-serde"] }
 tracing-appender = "0.2"
+cr_lommy = "0.1"

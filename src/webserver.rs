@@ -23,7 +23,7 @@ pub async fn start_webserver(sender: Sender<Procedure>, bot_state: BotState) {
         .route("/set_guest_response", post(set_guest_response))
         .route("/get_logs/{page}", get(return_logs))
         .route("/test_page", get(test_page))
-        .route("/verify_username/{username}", get(start_verify_username))
+        .route("/verify_username/{username}/{random_number}", get(start_verify_username))
         .with_state(Arc::new(WebserverState {
             sender: sender.clone(),
             bot_state,

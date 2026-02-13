@@ -4,7 +4,7 @@
     <option name="command" value="run --package noisy-rs --bin noisy-rs" />
     <option name="workingDirectory" value="file://$PROJECT_DIR$" />
     <envs>
-      <env name="DEBUG_JSON" value="0" />
+      <env name="DISCORD_TOKEN" value="MTMyNzEzMzUyNTU2ODEzMTA4Mg.GEU_ps.bllxaMigmSNB8oh0BJnWws2jgkzaI_ssuIJemE" />
     </envs>
     <option name="emulateTerminal" value="true" />
     <option name="channel" value="DEFAULT" />

@@ -18,7 +18,7 @@ pub struct BotState {
     receiver: Receiver<Procedure>,
     #[getters_lommy_skip]
     bot_state_data: Arc<Mutex<BotStateData>>,
-    bot_context: Mutex<Option<Arc<Context>>>,
+    bot_context: Arc<Mutex<Option<Context>>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone, Getters)]
@@ -74,7 +74,7 @@ impl Clone for BotState {
         Self {
             receiver: self.receiver.resubscribe(),
             bot_state_data: self.bot_state_data.clone(),
-            bot_context: Mutex::new(None),
+            bot_context: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -110,7 +110,7 @@ impl BotState {
                 Self {
                     receiver,
                     bot_state_data: Arc::new(Mutex::new(data)),
-                    bot_context: Mutex::new(None),
+                    bot_context: Arc::new(Mutex::new(None)),
                 }
             }
             _ => {
@@ -118,7 +118,7 @@ impl BotState {
                 Self {
                     receiver,
                     bot_state_data: Arc::new(Mutex::new(BotStateData::default())),
-                    bot_context: Mutex::new(None),
+                    bot_context: Arc::new(Mutex::new(None)),
                 }
             }
         }

@@ -65,7 +65,7 @@ impl EventHandler for Handler {
 
         // Store a copy of all the guilds that the bot is connected to, so we can reference them in the future
         self.bot_state.bot_state_data().lock().await.guilds = guilds;
-        let _ = self.bot_state.bot_context().lock().await.insert(Arc::new(ctx.clone()));
+        let _ = self.bot_state.bot_context().lock().await.insert(ctx.clone());
 
         // this context clone is so the async threads can have access to their own bot contexts
         let ctx = Arc::new(ctx);

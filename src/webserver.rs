@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::sync::Arc;
-use serenity::all::CreateMessage;
+use cr_lommy::AllArgsConstructor;
+use serenity::all::{CreateMessage, User};
 use tokio::sync::broadcast::Sender;
 use tracing::{info, warn};
 use crate::bot::{find_discord_user_with_name, BotState};
@@ -24,6 +25,7 @@ pub async fn start_webserver(sender: Sender<Procedure>, bot_state: BotState) {
         .route("/get_logs/{page}", get(return_logs))
         .route("/test_page", get(test_page))
         .route("/verify_username/{username}/{random_number}", get(start_verify_username))
+        .route("/discord/search_user/{username}", get(search_user))
         .with_state(Arc::new(WebserverState {
             sender: sender.clone(),
             bot_state,
@@ -31,6 +33,48 @@ pub async fn start_webserver(sender: Sender<Procedure>, bot_state: BotState) {
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+#[derive(Serialize, Deserialize, AllArgsConstructor)]
+pub struct DiscordUsernameSearchResponse {
+    results: Vec<DiscordUsernameSearchResult>
+}
+
+#[derive(Serialize, Deserialize, AllArgsConstructor)]
+pub struct DiscordUsernameSearchResult {
+    name: String,
+    id: u64,
+    avatar: Option<String>,
+    global_name: Option<String>,
+}
+
+impl From<User> for DiscordUsernameSearchResult {
+    fn from(user: User) -> Self {
+        let s = user.avatar_url().clone();
+
+        Self{
+            name: user.name,
+            id: user.id.get(),
+            avatar: s,
+            global_name: user.global_name,
+        }
+    }
+}
+
+async fn search_user(
+    State(state): State<Arc<WebserverState>>,
+    Path(discord_username): Path<String>,
+) -> Json<DiscordUsernameSearchResponse> {
+    info!("Searching for matching Discord accounts: {}", discord_username);
+
+    let ctx = state.bot_state.bot_context()
+        .lock().await.clone()
+        .expect("Bot context not present, this should never be able to happen!");
+
+    let found_users = find_discord_user_with_name(&discord_username, Arc::from(ctx.clone()), state.bot_state.clone()).await;
+    let resp = DiscordUsernameSearchResponse::new_all_args(found_users.into_iter().map(|a| a.user.into()).collect(),);
+
+    Json(resp)
 }
 
 #[tracing::instrument]
@@ -45,7 +89,7 @@ async fn start_verify_username(
         .lock().await.clone()
         .expect("Bot context not present, this should never be able to happen!");
 
-    let found_users = find_discord_user_with_name(&discord_username,ctx.clone(),state.bot_state.clone()).await;
+    let found_users = find_discord_user_with_name(&discord_username, Arc::from(ctx.clone()), state.bot_state.clone()).await;
     if found_users.len() > 2 {
         warn!("Found more than 2 users with discord username: {}", discord_username);
     }

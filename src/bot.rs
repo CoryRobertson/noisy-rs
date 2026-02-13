@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{Read, Write};
 use crate::event::{Event, EventResponse};
-use crate::webserver::Procedure;
+use crate::webserver::{Procedure, THING};
 use chrono::{Local, Utc};
 use serenity::all::{ActivityData, Channel, Context, CreateMessage, EventHandler, GuildId, Member, Message, MessageBuilder, Ready, UserId};
 use serenity::async_trait;
@@ -65,10 +65,13 @@ impl EventHandler for Handler {
 
         // Store a copy of all the guilds that the bot is connected to, so we can reference them in the future
         self.bot_state.bot_state_data().lock().await.guilds = guilds;
-        let _ = self.bot_state.bot_context().lock().await.insert(ctx.clone());
+        THING.set(ctx.clone()).unwrap();
+        let ctx = Arc::new(ctx);
+        *self.bot_state.bot_context().lock().await = Option::from(ctx.clone());
+
 
         // this context clone is so the async threads can have access to their own bot contexts
-        let ctx = Arc::new(ctx);
+
 
         if !self.thread_running.load(Ordering::Relaxed) {
             setup_bot_threads(self.bot_state.clone(), ctx.clone()).await;

@@ -12,13 +12,25 @@ use serenity::prelude::Context;
 use crate::event::Event;
 use crate::webserver::Procedure;
 
-#[derive(Debug, Getters)]
+#[derive(Debug)]
 pub struct BotState {
     /// this is a web event receiver that will prompt the bot to message all users
     receiver: Receiver<Procedure>,
-    #[getters_lommy_skip]
     bot_state_data: Arc<Mutex<BotStateData>>,
-    bot_context: Arc<Mutex<Option<Context>>>,
+    bot_context: Arc<Mutex<Option<Arc<Context>>>>,
+}
+
+
+impl BotState {
+    pub fn receiver(&self) -> &Receiver<Procedure> { &self.receiver }
+}
+impl BotState {
+
+}
+impl BotState {
+    pub fn bot_context(&self) -> Arc<Mutex<Option<Arc<Context>>>> {
+        self.bot_context.clone()
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone, Getters)]

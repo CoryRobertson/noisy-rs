@@ -8,10 +8,11 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, OnceLock};
 use cr_lommy::AllArgsConstructor;
-use serenity::all::{CreateMessage, User};
+use serenity::all::{Context, CreateMessage, User};
 use tokio::sync::broadcast::Sender;
+use tokio::sync::Mutex;
 use tracing::{info, warn};
 use crate::bot::{find_discord_user_with_name, BotState};
 
@@ -61,15 +62,19 @@ impl From<User> for DiscordUsernameSearchResult {
     }
 }
 
+pub static THING: OnceLock<Context> = OnceLock::new();
+
+
 async fn search_user(
     State(state): State<Arc<WebserverState>>,
     Path(discord_username): Path<String>,
 ) -> Json<DiscordUsernameSearchResponse> {
     info!("Searching for matching Discord accounts: {}", discord_username);
 
-    let ctx = state.bot_state.bot_context()
-        .lock().await.clone()
-        .expect("Bot context not present, this should never be able to happen!");
+    // let ctx = state.bot_state.bot_context()
+    //     .lock().await.clone()
+    //     .expect("Bot context not present, this should never be able to happen!");
+    let ctx = THING.get().unwrap().clone();
 
     let found_users = find_discord_user_with_name(&discord_username, Arc::from(ctx.clone()), state.bot_state.clone()).await;
     let resp = DiscordUsernameSearchResponse::new_all_args(found_users.into_iter().map(|a| a.user.into()).collect(),);

@@ -10,7 +10,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 use cr_lommy::AllArgsConstructor;
-use serenity::all::{CreateMessage, User};
+use serenity::all::{CreateMessage, User, UserId};
 use tokio::sync::broadcast::Sender;
 use tracing::{info, warn};
 use crate::bot::{find_discord_user_with_name, BotState};
@@ -24,7 +24,7 @@ pub async fn start_webserver(sender: Sender<Procedure>, bot_state: BotState) {
         .route("/set_guest_response", post(set_guest_response))
         .route("/get_logs/{page}", get(return_logs))
         .route("/test_page", get(test_page))
-        .route("/verify_username/{username}/{random_number}", get(start_verify_username))
+        .route("/verify_user_id/{user_id}/{random_number}", get(start_verify_user_id))
         .route("/discord/search_user/{username}", get(search_user))
         .with_state(Arc::new(WebserverState {
             sender: sender.clone(),
@@ -78,39 +78,31 @@ async fn search_user(
 }
 
 #[tracing::instrument]
-async fn start_verify_username(
+async fn start_verify_user_id(
     State(state): State<Arc<WebserverState>>,
-    Path(discord_username): Path<String>,
-    Path(random_number): Path<u32>,
+    Path((discord_id, random_number)): Path<(u64,u32)>,
 ) -> Response<Body> {
-    info!("Starting verification of discord username: {}", discord_username);
+    info!("Starting verification of discord username: {}", discord_id);
 
     let ctx = state.bot_state.bot_context()
         .lock().await.clone()
         .expect("Bot context not present, this should never be able to happen!");
 
-    let found_users = find_discord_user_with_name(&discord_username, Arc::from(ctx.clone()), state.bot_state.clone()).await;
-    if found_users.len() > 2 {
-        warn!("Found more than 2 users with discord username: {}", discord_username);
+    match UserId::new(discord_id).to_user(&ctx.http).await {
+        Ok(user) => {
+            match user.direct_message(&ctx.http, CreateMessage::new().content(format!("Your verification code is: {}", random_number))).await {
+                Ok(_) => {
+                    Response::builder().status(200).body(Body::empty()).unwrap()
+                }
+                Err(err) => {
+                    Response::builder().status(500).body(Body::new(err.to_string())).unwrap()
+                }
+            }
+        }
+        Err(err) => {
+            Response::builder().status(500).body(Body::new(err.to_string())).unwrap()
+        }
     }
-
-    let bsd = state.bot_state.bot_state_data().clone();
-    let mut lock = bsd.lock().await;
-
-    for mem in found_users {
-        let _ = mem.user.direct_message(&ctx.http,CreateMessage::new().content(format!("Your verification code is: {}", random_number))).await;
-
-        // TODO: probably dont need this? unsure
-        // add user to verification list if they are not already present
-        // if lock.waiting_to_verify().iter().find(|(u,_)| u.id.clone() == mem.user.id.clone()).is_none() {
-        //     lock.waiting_to_verify.push((mem.user, random_number));
-        // }
-        // TODO: we can make a post request or get request with the found usernames and the random number we sent them to event star
-    }
-
-
-
-    Response::builder().status(200).body(Body::empty()).unwrap()
 }
 
 

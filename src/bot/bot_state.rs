@@ -74,7 +74,7 @@ impl Clone for BotState {
         Self {
             receiver: self.receiver.resubscribe(),
             bot_state_data: self.bot_state_data.clone(),
-            bot_context: Arc::new(Mutex::new(None)),
+            bot_context: Arc::clone(&self.bot_context),
         }
     }
 }

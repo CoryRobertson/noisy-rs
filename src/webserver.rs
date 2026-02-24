@@ -24,14 +24,14 @@ pub async fn start_webserver(sender: Sender<Procedure>, bot_state: BotState) {
         .route("/set_guest_response", post(set_guest_response))
         .route("/get_logs/{page}", get(return_logs))
         .route("/test_page", get(test_page))
-        .route("/verify_user_id/{user_id}/{random_number}", get(start_verify_user_id))
+        .route("/discord/verify_user_id/{user_id}/{random_number}", get(start_verify_user_id))
         .route("/discord/search_user/{username}", get(search_user))
         .with_state(Arc::new(WebserverState {
             sender: sender.clone(),
             bot_state,
         }));
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3003").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -43,7 +43,7 @@ pub struct DiscordUsernameSearchResponse {
 #[derive(Serialize, Deserialize, AllArgsConstructor)]
 pub struct DiscordUsernameSearchResult {
     name: String,
-    id: u64,
+    id: String,
     avatar: Option<String>,
     global_name: Option<String>,
 }
@@ -54,7 +54,7 @@ impl From<User> for DiscordUsernameSearchResult {
 
         Self{
             name: user.name,
-            id: user.id.get(),
+            id: user.id.get().to_string(),
             avatar: s,
             global_name: user.global_name,
         }
@@ -80,7 +80,7 @@ async fn search_user(
 #[tracing::instrument]
 async fn start_verify_user_id(
     State(state): State<Arc<WebserverState>>,
-    Path((discord_id, random_number)): Path<(u64,u32)>,
+    Path((discord_id, random_number)): Path<(u64,String)>,
 ) -> Response<Body> {
     info!("Starting verification of discord username: {}", discord_id);
 

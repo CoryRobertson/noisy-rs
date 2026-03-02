@@ -11,6 +11,7 @@ use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 use cr_lommy::AllArgsConstructor;
 use serenity::all::{CreateMessage, User, UserId};
+use tokio::runtime::{Handle};
 use tokio::sync::broadcast::Sender;
 use tracing::{info, warn};
 use crate::bot::{find_discord_user_with_name, BotState};
@@ -26,6 +27,7 @@ pub async fn start_webserver(sender: Sender<Procedure>, bot_state: BotState) {
         .route("/test_page", get(test_page))
         .route("/discord/verify_user_id/{user_id}/{random_number}", get(start_verify_user_id))
         .route("/discord/search_user/{username}", get(search_user))
+        .route("/discord/get_users", post(get_users))
         .with_state(Arc::new(WebserverState {
             sender: sender.clone(),
             bot_state,
@@ -59,6 +61,39 @@ impl From<User> for DiscordUsernameSearchResult {
             global_name: user.global_name,
         }
     }
+}
+
+/// Received from EventStar. Contains a list of Discord Idss comes f
+#[derive(Serialize, Deserialize)]
+struct UserIdList {
+    list: Vec<String>
+}
+
+async fn get_users(
+    State(state): State<Arc<WebserverState>>,
+    Json(userList): Json<UserIdList>,
+) -> Json<DiscordUsernameSearchResponse> {
+    info!("Retrieving Discord accounts for matching Discord ids.");
+
+    let ctx = state.bot_state.bot_context()
+        .lock().await.clone()
+        .expect("Bot context not present, this should never be able to happen!");
+
+    let mut users: Vec<DiscordUsernameSearchResult> = vec![];
+
+    for future in userList.list.iter().filter_map(|uid| {
+        uid.parse()
+            .map(|r: u64| UserId::new(r).to_user(&ctx.http))
+            .ok()
+    }) {
+        if let Ok(user) = future.await {
+            users.push(user.into());
+        }
+    }
+
+    let resp = DiscordUsernameSearchResponse::new_all_args(users);
+
+    Json(resp)
 }
 
 async fn search_user(

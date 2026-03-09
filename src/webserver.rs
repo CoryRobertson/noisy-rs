@@ -11,6 +11,7 @@ use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 use cr_lommy::AllArgsConstructor;
 use serenity::all::{CreateMessage, User, UserId};
+use serenity::all::standard::Reason::Log;
 use tokio::runtime::{Handle};
 use tokio::sync::broadcast::Sender;
 use tracing::{info, warn};
@@ -192,6 +193,8 @@ async fn set_guest_response(
 #[derive(Serialize, Deserialize, Debug)]
 struct Embellishment {
     logs: Vec<LogLine>,
+    pages: usize,
+    lines: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -221,15 +224,19 @@ struct Span {
 async fn return_logs(Path(page): Path<usize>) -> Json<Embellishment> {
     let file = File::open("logs/logs.log").unwrap();
     let br = BufReader::new(file);
-    let lines = br
+
+    // Prob not very efficient...
+    let all_lines = br
         .lines()
-        .skip(page * 500)
-        .take(500)
         .filter_map(|s| s.ok().map(|s| serde_json::from_str(&s).ok()).flatten())
         .collect::<Vec<LogLine>>();
 
-    info!("Got {} log lines from page: {}", lines.len(), page);
-    let e: Embellishment = Embellishment { logs: lines };
+    let line_count = all_lines.len();
+
+    let page_content:Vec<LogLine> = all_lines.into_iter().skip(page * 500).take(500).collect();
+
+    info!("Got {} log lines from page: {}", page_content.len(), page);
+    let e: Embellishment = Embellishment { logs: page_content, pages:  line_count.div_ceil(500), lines: line_count };
 
     Json(e)
 }

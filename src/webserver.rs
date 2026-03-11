@@ -226,12 +226,14 @@ async fn return_logs(Path(page): Path<usize>) -> Json<Embellishment> {
     let br = BufReader::new(file);
 
     // Prob not very efficient...
-    let all_lines = br
+    let mut all_lines = br
         .lines()
         .filter_map(|s| s.ok().map(|s| serde_json::from_str(&s).ok()).flatten())
         .collect::<Vec<LogLine>>();
 
     let line_count = all_lines.len();
+
+    all_lines.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
 
     let page_content:Vec<LogLine> = all_lines.into_iter().skip(page * 500).take(500).collect();
 

@@ -16,6 +16,7 @@ pub struct Guest {
 #[derive(Clone, Deserialize, Serialize, Debug, Eq, PartialEq)]
 pub enum EventResponse {
     Going,
+    MaybeGoing,
     NotGoing,
     NoResponse,
 }
@@ -67,7 +68,7 @@ impl Guest {
 pub struct ChangeRSVP {
     pub event_id: String,
     pub user_id: String,
-    pub responded: EventResponse,
+    pub responded: Option<EventResponse>,
     pub notify_amount: u32,
 }
 

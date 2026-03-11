@@ -69,7 +69,7 @@ fn output_debug_json() {
     let event = noisy_rs::event::Event::default();
     let guest = noisy_rs::event::Guest::new("cool_test_user", 1);
     let change_rsvp = noisy_rs::event::ChangeRSVP {
-        responded: EventResponse::Going,
+        responded: Option::from(EventResponse::Going),
         event_id: "123".to_string(),
         user_id: "234".to_string(),
         notify_amount: 3,

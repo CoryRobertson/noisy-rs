@@ -1,4 +1,4 @@
-use crate::event::{ChangeRSVP, Event, Guest};
+use crate::event::{ChangeRSVP, Event, EventResponse, Guest};
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{Response};
@@ -171,14 +171,28 @@ async fn set_guest_response(
                     tracing::log::warn!("{}: Invited guest not found", change_rsvp.event_id);
 
                     let mut new_guest = Guest::new(rsvp.clone().user_id, rsvp.notify_amount).unwrap();
-                    new_guest.set_responded(rsvp.clone().responded);
+
+                    // Optionally add in the response
+                    match rsvp.clone().responded{
+                        None => {
+                            new_guest.set_responded(EventResponse::NoResponse);
+                        }
+                        Some(r) => {
+                            new_guest.set_responded(r);
+                        }
+                    }
 
                     event.mut_guest_list().push(new_guest);
                     Response::builder().status(203).body(Body::empty()).unwrap()
                 }
                 Some(guest) => {
                     info!("Found event and guest: {:?}", guest);
-                    guest.set_responded(change_rsvp.responded);
+
+                    // Optionally change the response
+                    if let Some(responded) = rsvp.responded.clone() {
+                        guest.set_responded(responded);
+                    }
+
                     guest.set_notify_amount(change_rsvp.notify_amount);
                     Response::builder().status(200).body(Body::empty()).unwrap()
                 }

@@ -13,12 +13,13 @@ pub struct Guest {
     responded: EventResponse,
 }
 
+// These are derived from the actual EventStar options
 #[derive(Clone, Deserialize, Serialize, Debug, Eq, PartialEq)]
 pub enum EventResponse {
-    Going,
-    MaybeGoing,
-    NotGoing,
-    NoResponse,
+    YES,
+    MAYBE,
+    NO,
+    NO_RESPONSE,
 }
 
 impl Guest {
@@ -39,7 +40,7 @@ impl Guest {
         Some(Self {
             user_id,
             notify_amount,
-            responded: EventResponse::NoResponse,
+            responded: EventResponse::NO,
         })
     }
 

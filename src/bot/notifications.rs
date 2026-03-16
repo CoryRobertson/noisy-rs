@@ -143,7 +143,7 @@ pub(crate) async fn rsvp_hour_before_notification_spawner(event: Event, ctx: Arc
                 .guest_list()
                 .iter()
                 .filter(|s| s.notify_amount() > 1)
-                .filter(|s| s.responded() == EventResponse::NoResponse)
+                .filter(|s| s.responded() == EventResponse::NO)
             {
                 match user.user_id().parse().map(|id| { UserId::new(id) }).map(|id| { id.to_user(&ctx) }) {
                     Ok(id_future) => {

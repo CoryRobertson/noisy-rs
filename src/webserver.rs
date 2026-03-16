@@ -24,11 +24,12 @@ pub async fn start_webserver(sender: Sender<Procedure>, bot_state: BotState) {
     let app = Router::new()
         .route("/new_event", post(handle_new_event))
         .route("/set_guest_response", post(set_guest_response))
+        .route("/get_guest_response", post(get_guest_response))
         .route("/get_logs/{page}", get(return_logs))
         .route("/test_page", get(test_page))
         .route("/discord/verify_user_id/{user_id}/{random_number}", get(start_verify_user_id))
         .route("/discord/search_user/{username}", get(search_user))
-        .route("/discord/get_users", post(get_users))
+        .route("/discord/get_users", post(get_users)) //todo: get user's notification amount for an event
         .with_state(Arc::new(WebserverState {
             sender: sender.clone(),
             bot_state,
@@ -64,7 +65,7 @@ impl From<User> for DiscordUsernameSearchResult {
     }
 }
 
-/// Received from EventStar. Contains a list of Discord Idss comes f
+/// Received from EventStar. Contains a list of Discord Ids
 #[derive(Serialize, Deserialize)]
 struct UserIdList {
     list: Vec<String>
@@ -175,7 +176,7 @@ async fn set_guest_response(
                     // Optionally add in the response
                     match rsvp.clone().responded{
                         None => {
-                            new_guest.set_responded(EventResponse::NoResponse);
+                            new_guest.set_responded(EventResponse::NO);
                         }
                         Some(r) => {
                             new_guest.set_responded(r);
@@ -202,6 +203,34 @@ async fn set_guest_response(
     state.sender.send(Procedure::SetRSVP(rsvp)).unwrap();
 
     response
+}
+
+
+#[derive(Serialize, Deserialize, AllArgsConstructor, Debug)]
+pub struct GetGuestResponseRequest {
+    user_id: String,
+    event_id: String,
+}
+
+#[tracing::instrument]
+async fn get_guest_response(
+    State(state): State<Arc<WebserverState>>,
+    Json(get_rsvp): Json<GetGuestResponseRequest>,
+) -> impl IntoResponse {
+    info!("Getting guest response: {:?}", get_rsvp);
+
+    let l = state.bot_state.bot_state_data();
+    let lock = l.lock().await;
+
+    match lock.events().iter().find(|e| {e.event_id() == get_rsvp.event_id}).map(|e| e.guest_list().iter().find(|g|{g.user_id() == get_rsvp.user_id})).flatten() {
+        None => {
+            Response::builder().status(404).body(Body::new("Unable to find guest and/or response".to_string())).unwrap()
+        }
+        Some(guest) => {
+            // Found event and the guest
+            Json(guest.clone()).into_response()
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
